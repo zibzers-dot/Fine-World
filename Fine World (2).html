@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fine World</title>
+<style>
+:root{--bg:#f4f1e8;--fg:#222;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#15151c;--fg:#eee}}
+:root[data-theme="dark"]{--bg:#15151c;--fg:#eee}
+html,body{margin:0;background:var(--bg);color:var(--fg);font-family:monospace;text-align:center}
+canvas{width:min(96vw,calc(70vh*256/224));image-rendering:pixelated;border:4px solid #333;border-radius:6px;margin-top:8px;background:#000}
+.pad{display:grid;grid-template-columns:repeat(3,52px);gap:4px;justify-content:center;margin:8px auto}
+.kp{grid-template-columns:repeat(3,64px);gap:4px;justify-content:center;margin:8px auto}
+button{height:46px;font:bold 16px monospace;border-radius:8px;border:2px solid #555;background:var(--bg);color:var(--fg);touch-action:none}
+.act{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}.act button{width:72px;font-size:13px}
+p{font-size:12px;opacity:.7;margin:4px}
+</style></head><body>
+<canvas id="c" width="256" height="224"></canvas>
+<div class="pad"><span></span><button data-k="ArrowUp">▲</button><span></span><button data-k="ArrowLeft">◀</button><button data-k="ArrowDown">▼</button><button data-k="ArrowRight">▶</button></div>
+<div class="act"><button data-k="KeyZ">A: OK</button><button data-k="KeyE">E: Items</button><button data-k="KeyB">B: Bike</button><button data-k="KeyM">♪</button><button data-k="Escape">Hang up</button></div>
+<div id="kp" class="kp" style="display:none"></div>
+<p>Arrows/WASD move · Z/Space/Enter talk/OK · At a payphone press Z, type digits, Enter = call · M = music<br>Battle keys (2-4 players share one keyboard): P1 ↑↓+Z · P2 W/S+F · P3 I/K+J · P4 T/G+H</p>
+<script>
+const C=document.getElementById('c'),g=C.getContext('2d'),keys={},press={};
+function kd(k){if(!keys[k])press[k]=1;keys[k]=1}
+onkeydown=e=>{kd(e.code);if(e.key.length===1)TY+=e.key;e.preventDefault()};onkeyup=e=>{keys[e.code]=0};
+function bind(b,k){b.onpointerdown=e=>{e.preventDefault();kd(k)};b.onpointerup=b.onpointerleave=()=>{keys[k]=0}}
+document.querySelectorAll('[data-k]').forEach(b=>bind(b,b.dataset.k));
+const kp=document.getElementById('kp');
+[1,2,3,4,5,6,7,8,9,'⌫',0,'Call'].forEach(l=>{const b=document.createElement('button');b.textContent=l;kp.appendChild(b);bind(b,l==='⌫'?'Backspace':l==='Call'?'Enter':'Digit'+l)});
+const OK=['KeyZ','Space','Enter'],hit=(...c)=>c.some(k=>press[k]),R=(a,b)=>a+Math.floor(Math.random()*(b-a+1));
+// ===== MAP: the town of Pure =====
+let W=72,H=56,map=[];const T=16;
+for(let y=0;y<H;y++){map[y]=[];for(let x=0;x<W;x++)map[y][x]=0}
+for(let i=1;i<W-1;i++)for(const r of[12,13,34,35])map[r][i]=1;
+for(let i=1;i<H-1;i++)for(const c of[20,21,50,51])map[i][c]=1;
+for(let x=0;x<W;x++)map[0][x]=map[H-1][x]=3;
+for(let y=0;y<H;y++)map[y][0]=map[y][W-1]=3;
+function house(x,y,w,h,d,wl){for(let j=y;j<y+h;j++)for(let i=x;i<x+w;i++)map[j][i]=wl;map[y+h-1][x+(w>>1)]=d}
+house(10,5,6,4,5,2);house(24,5,7,4,8,11);house(34,5,6,4,9,12);house(42,5,6,4,10,13);house(53,15,7,4,16,2);house(6,24,7,4,17,2);
+[[6,16,5],[26,16,6],[38,17,5],[54,6,6],[8,38,6],[30,40,6],[56,38,6],[40,24,5]].forEach(([x,y,w])=>house(x,y,w,4,15,2));
+for(let i=0;i<300;i++){const x=R(1,W-2),y=R(1,H-2);if(!map[y][x]&&!(x>7&&x<20&&y>8&&y<12))map[y][x]=3}
+for(let i=0;i<160;i++){const x=R(1,W-2),y=R(1,H-2);if(!map[y][x])map[y][x]=4}
+for(let y=2;y<=5;y++)for(let x=62;x<=68;x++)map[y][x]=7;
+for(let y=6;y<=11;y++)for(let x=60;x<=70;x++)map[y][x]=0;
+map[5][65]=6;
+[[13,8],[27,8],[37,8],[45,8],[56,18],[9,27]].forEach(([x,y])=>{for(let j=1;j<=2;j++)for(let i=-1;i<=1;i++)if(map[y+j][x+i]!==1)map[y+j][x+i]=0});
+[[17,10],[48,10],[62,10],[30,33],[60,36]].forEach(([x,y])=>map[y][x]=14);
+const LB=[[10,5,'HOME'],[24,5,'HOSPITAL'],[34,5,'FOOD'],[42,5,'STORE'],[53,15,'HOTEL'],[6,24,'OFFICE']],DOORID={5:'home',8:'hospital',9:'food',10:'store',16:'hotel',17:'office'};
+const SO=new Set([2,3,7,11,12,13,14,21,22,23,24,26,27,28,29,31,33]),solid=t=>SO.has(t);
+const WALL={2:'#c0643c',11:'#f4f4f4',12:'#e8b64a',13:'#4a7fd0'},DR={5:['#c0643c','#6a3d20'],8:['#f4f4f4','#d33'],9:['#e8b64a','#7a3'],10:['#4a7fd0','#fd0'],15:['#c0643c','#6a3d20'],16:['#7a3a8a','#fd0'],17:['#6a7a8a','#fd0']};
+const tileAt=(px,py)=>{const x=Math.floor(px/T),y=Math.floor(py/T);return(x<0||y<0||x>=W||y>=H)?3:map[y][x]};
+// ===== PARTY (four players) & STATE =====
+const P={x:13*T+2,y:9*T,face:'d',step:0},trail=[];
+const P4=[{n:'You',hat:'#d22',body:'#46c',max:90,pp:24,atk:4},{n:'Mia',hat:'#fd4',body:'#f8a',max:36,pp:18,atk:-1},{n:'Leo',hat:'#333',body:'#4a6',max:40,pp:14,atk:1},{n:'Zoe',hat:'#a4e',body:'#eee',max:34,pp:20,atk:-1}];
+P4.forEach(m=>{m.hp=m.shown=m.max;m.ppm=m.pp});P4.length=1;
+const G={money:20,cookie:3,burger:0,lens:0,shards:0,lv:1,exp:0,bat:0,arm:0,mom:0,belly:0,nb:{}};
+const healAll=()=>P4.forEach(m=>{m.hp=m.max;m.pp=m.ppm});
+let npcs=[
+{x:14*T,y:11*T,hat:'#999',body:'#a86',t:['Grandpa Joe: Pure used to be Fine. Then the animals got mad.','Three beasts hold the Moon Shards: Bull Dog Chief (south-west), Mad Monkey King (south-east), Alpha Stray Cat (east).','The cave is far north-east, guarded by the Angry Goat. You need a Lantern from the store too.']},
+{x:28*T,y:11*T,hat:'#4a8',body:'#fc6',t:['Payphones are around town. Press Z next to one and dial.','Your mom\'s number is on the fridge note at home.']},
+{x:40*T,y:22*T,hat:'#a63',body:'#8cf',t:['Beat animals, earn money, buy better gear at the store.','The hospital will revive anyone who got knocked out.']},
+{x:63*T,y:9*T,hat:'#555',body:'#9c9',t:['The cave is right behind me. The goat has been angry since Tuesday.','Without a Lantern and 3 Moon Shards you won\'t get in.']}];
+const ET=[['Stray Cat',24,3,6,8,2,'#bbb','hisses and scratches.'],['Crow',28,4,7,10,3,'#334','caws and dives at you.'],['Raccoon',36,5,8,13,4,'#778','swipes with tiny hands.'],['Bull Dog',48,7,11,18,6,'#b85','bites down hard.'],['Mad Monkey',56,8,13,22,8,'#a63','throws a banana peel.'],['Wild Boar',70,10,15,28,10,'#755','charges!']];
+let foes=[];
+function mk(t,x,y,o){foes.push({name:t[0],hp:t[1],max:t[1],a:[t[2],t[3]],xp:t[4],g:t[5],col:t[6],verb:t[7],x:x*T,y:y*T,dx:0,dy:0,cool:0,...o});if(solid(map[y][x]))map[y][x]=0}
+for(let i=0;i<14;i++){const x=R(2,W-3),y=R(2,H-3),d=Math.hypot(x-13,y-9);if(d<10||map[y][x]===1||(x>59&&y<12))continue;mk(ET[Math.max(0,Math.min(5,Math.floor(d/12))-R(0,1))],x,y)}
+mk(['Bull Dog Chief',130,10,15,60,30,'#a64','growls like thunder.'],9,46,{boss:1,shard:'Moon Shard'});
+mk(['Mad Monkey King',170,12,18,80,40,'#852','screeches and hurls coconuts.'],62,46,{boss:1,shard:'Moon Shard'});
+mk(['Alpha Stray Cat',200,13,20,100,50,'#999','claws the air and you.'],62,24,{boss:1,shard:'Moon Shard'});
+mk(['Angry Goat',240,16,26,200,100,'#f4f4f4','headbutts you with fury!'],65,7,{final:1});
+npcs.forEach((o,i)=>o.k='o'+i);npcs.forEach(o=>{const x=Math.floor((o.x+8)/T),y=Math.floor((o.y+8)/T);if(solid(map[y][x]))map[y][x]=0});
+let mode='title',SV=null,room=null,wait=0,TY='',su=null,NP=1,CV=null,SM=null,cur='field',cst=0,dlg=null,en=null,ti=0,bm=0,bph='msg',tick=0,ended=0,lock=0,mn=null,num='';
+// ===== DIALOGUE / MENUS =====
+function say(lines,cb){dlg={lines,i:0,ch:0,cb}}
+function wrap(s,w){const o=[];let l='';for(const a of s.split(' ')){if(g.measureText(l+a).width>w){o.push(l);l=''}l+=a+' '}o.push(l);return o}
+function box(x,y,w,h){g.fillStyle='#000';g.fillRect(x-2,y-2,w+4,h+4);g.fillStyle='#fff';g.fillRect(x-1,y-1,w+2,h+2);g.fillStyle='#202040';g.fillRect(x,y,w,h)}
+const cm=()=>{mn=null;mode='walk'};
+function openMenu(t,o){mn={t,o,i:0};mode='menu'}
+function buy(c,f,m){if(G.money<c)say(['Not enough money!']);else{G.money-=c;f();say([m])}}
+function door(t){if(t===16)openMenu('PURE HOTEL',[['Stay the night  $15',()=>buy(15,()=>{healAll();G.belly=0},'You sleep like a log. Fancy hotel!')],['Leave',cm]]);
+ if(t===5)openMenu('HOME',[['Rest (heal everyone)',()=>{healAll();say(['Mom: Sleep tight, kiddo!','Everyone feels great.'])}],['Read fridge note',()=>say(['MOM: 646-717-4844','PURE MART: 646-982-0901','Use a payphone: Z next to it, type digits, Enter.'])],['Leave',cm]]);
+ if(t===8)openMenu('PURE HOSPITAL',[['Full heal + revive  $10',()=>buy(10,healAll,'The nurse patches everyone up.')],['Leave',cm]]);
+ if(t===9)openMenu('PURE FOOD',[['Cookie  $3 (heals 25)',()=>buy(3,()=>G.cookie++,'Got a Cookie.')],['Burger  $8 (heals 60)',()=>buy(8,()=>G.burger++,'Got a Burger.')],['Leave',cm]]);
+ if(t===10)openMenu('PURE STORE',[['Lantern  $30',()=>G.lens?say(['You already have one.']):buy(30,()=>G.lens=1,'Got the Lantern!')],['Bat upgrade  $'+(40+30*G.bat),()=>G.bat>=3?say(['No better bats in stock.']):buy(40+30*G.bat,()=>G.bat++,'Bat upgraded!')],['Armor  $'+(40+30*G.arm),()=>G.arm>=3?say(['No better armor in stock.']):buy(40+30*G.arm,()=>G.arm++,'Armor upgraded!')],['Steal something?',()=>{cm();say(['You stuff a candy bar in your jacket...','Officer Pickle: Hey! Stop right there, kid!'],()=>enter('jail'))}],['Leave',cm]])}
+const hint=()=>!G.lens?'Buy a Lantern at the Pure Store, honey. It costs $30.':G.shards<3?'You have '+G.shards+'/3 Moon Shards. Beat the three beast chiefs!':'Head to the cave in the north-east. Watch out for the Angry Goat!';
+const WRONG=['Hello? ...Wrong number, kiddo.','A parrot answers and repeats your number back.','"Pizza Planet, please hold." You hold forever.','You hear a goat bleating angrily, then a click.','Busy signal. beep beep beep beep.','Someone says "Fine." and hangs up.'];
+function callNum(n){mode='walk';
+ if(n==='6467174844'){momTalk()}else if(0){if(!G.mom){G.mom=1;G.money+=20;say(['Mom: Hi sweetie! Be careful out there.','Here, I wired you $20 for snacks. Don\'t ask how.'])}else say(['Mom: '+hint()])}
+ else if(n==='6469999999')door(10);else if(n==='6469820901')openMenu('PURE MART DELIVERY',[['3 Cookies  $8',()=>buy(8,()=>G.cookie+=3,'Delivered 3 cookies!')],['2 Burgers  $14',()=>buy(14,()=>G.burger+=2,'Delivered 2 burgers!')],['Hang up',cm]]);
+ else if(n==='911')emergency();else if(n.length<7)say(['The line goes dead. Dial a full number!']);
+ else strangerCall()}
+// ===== BATTLE =====
+function startBattle(e){mode='battle';en=e;bm=0;ti=P4.findIndex(m=>m.hp>0);bph='msg';say(['A '+e.name+' draws near!'],()=>{bph='menu'})}
+function heal(v){const t=P4.filter(m=>m.hp>0).sort((a,b)=>a.hp/a.max-b.hp/b.max)[0];t.hp=Math.min(t.max,t.hp+v)}
+function choose(){const m=P4[ti],back=()=>{bph='menu'};bph='msg';
+ if(bm===0){const d=R(10,16)+G.lv*2+m.atk+G.bat*4;en.hp-=d;say([m.n+' bashes it for '+d+'!'],step)}
+ else if(bm===1){if(m.pp<4)return say(['Not enough PP!'],back);m.pp-=4;const d=R(26,36)+G.lv*3;en.hp-=d;say([m.n+' uses PSI Zap! '+d+' damage!'],step)}
+ else if(bm<4){const k=bm===2?'cookie':'burger';if(!G[k])return say(['None left!'],back);G[k]--;heal(bm===2?25:60);const w=stuff(bm===2?1:2);say(['Someone eats a '+k+'. HP is recovering!'+(w?' '+w:'')],step)}
+ else{const b=en.boss||en.final;if(b||Math.random()>.6)say([b?"You can't run from this one!":"Can't escape!"],step);else say(['Got away!'],()=>{mode='walk';en.cool=200})}}
+function step(){if(en.hp<=0)return win();
+ do{ti++}while(ti<P4.length&&P4[ti].hp<=0);
+ if(ti<P4.length){bph='menu';return}
+ const al=P4.filter(m=>m.hp>0),tg=al[R(0,al.length-1)],d=Math.max(1,R(en.a[0],en.a[1])-G.arm*2);tg.hp=Math.max(0,tg.hp-d);
+ say([en.name+' '+en.verb,tg.n+' takes '+d+' damage!'+(tg.hp?'':' '+tg.n+' is knocked out!')],()=>{if(G.belly>=9)P4.forEach(m=>{if(m.hp>1)m.hp-=2});if(P4.every(m=>m.hp<=0))lose();else{ti=P4.findIndex(m=>m.hp>0);bph='menu'}})}
+function win(){en.dead=1;const L=['You won! +'+en.xp+' EXP, +$'+en.g+'.'];G.exp+=en.xp;G.money+=en.g;
+ if(en.shard){G.shards++;chime();L.push('The '+en.name+' drops a Moon Shard! ('+G.shards+'/3)')}
+ while(G.exp>=G.lv*G.lv*14){G.lv++;P4.forEach(m=>{m.max+=14;m.ppm+=4;m.hp=m.max;m.pp=m.ppm});L.push('Level up! Everyone is now level '+G.lv+'.')}
+ if(en.final)L.push('The Angry Goat calms down at last. The cave is open!');
+ say(L,()=>{mode='walk'})}
+function lose(){say(['Everyone blacked out...','You wake up at home. You lost half your money.'],()=>{G.money>>=1;healAll();P.x=13*T+2;P.y=9*T;en.cool=300;mode='walk'})}
+function winGame(){if(G.won)return;G.won=1;say(['YOU WIN!','The Still Stone glows warm under your hand.','At the end sits the Still Stone. You touch it, and a clock somewhere ticks to 3:08.','Pure is Fine again, and the animals calm down. Fine World is saved!','There is more to Fine World. Keep exploring, ride your bike (B), and press E for items.'])}
+function caveStep(){const need=[];if(!G.lens)need.push('a Lantern');if(G.shards<3)need.push((3-G.shards)+' more Moon Shard(s)');if(!foes.find(f=>f.final).dead)need.push('to beat the Angry Goat');
+ if(need.length){P.y+=24;say(['The cave mouth is pitch black. A stone door has three sockets.','You still need: '+need.join(', ')+'.'])}else enterCave()}
+// ===== UPDATE =====
+function update(){
+ if(hit('KeyM'))musicOn^=1;
+ tick++;P4.forEach(m=>{if(m.shown>m.hp)m.shown--;else if(m.shown<m.hp)m.shown++});if(wait)return;if(tick%900===0){if(G.belly>0)G.belly--;for(const k in G.nb)if(G.nb[k]>0)G.nb[k]--}
+ if(mode==='title'){if(hit(...OK)){mode='setup';startMusic();su={st:'g',i:0,sel:0,name:''};TY=''}return}
+ if(mode==='setup'){const s=su;
+  if(s.st==='n'){if(hit('ArrowUp','KeyW')&&s.sel>0)s.sel--;if(hit('ArrowDown','KeyS')&&s.sel<3)s.sel++;for(let i=1;i<5;i++)if(hit('Digit'+i))s.sel=i-1;if(hit(...OK)){NP=s.sel+1;s.st='g';s.sel=0;TY=''}}
+  else if(s.st==='g'){if(hit('ArrowUp','ArrowDown','KeyW','KeyS'))s.sel^=1;if(hit(...OK)){P4[s.i].girl=s.sel;s.st='t';s.name='';TY=''}}
+  else{const z=TY;TY='';s.name=(s.name+z.replace(/[^\w ]/g,'')).slice(0,8);if(hit('Backspace'))s.name=s.name.slice(0,-1);
+   if(hit('Enter')||(hit('KeyZ')&&!/z/i.test(z))){P4[s.i].n=s.name.trim()||['You','Mia','Leo','Zoe'][s.i];s.i++;s.sel=0;TY='';if(s.i>=NP){mode='walk';say(STORY)}else s.st='g'}}
+  return}
+ if(dlg){const L=dlg.lines[dlg.i];dlg.ch+=.8;
+  if(hit(...OK)){if(dlg.ch<L.length)dlg.ch=L.length;else{dlg.i++;dlg.ch=0;if(dlg.i>=dlg.lines.length){const c=dlg.cb;dlg=null;c&&c()}}}return}
+ if(mode==='phone'){for(let i=0;i<10;i++)if(hit('Digit'+i,'Numpad'+i)&&num.length<10)num+=i;
+  if(hit('Backspace'))num=num.slice(0,-1);if(hit('Escape'))mode='walk';else if(hit('Enter')){const n=num;num='';callNum(n)}return}
+ if(mode==='menu'){const n=mn.o.length;if(hit('ArrowUp','KeyW'))mn.i=(mn.i+n-1)%n;if(hit('ArrowDown','KeyS'))mn.i=(mn.i+1)%n;if(hit('Escape'))cm();else if(hit(...OK))mn.o[mn.i][1]();return}
+ if(mode==='battle'){if(bph==='menu'){
+  if(ti>=NP){if(tick%25===0){bm=R(0,1);if(bm===1&&P4[ti].pp<4)bm=0;choose()}}
+  else{const K=[[NP>1?['ArrowUp']:['ArrowUp','KeyW'],NP>1?['ArrowDown']:['ArrowDown','KeyS'],OK],[['KeyW'],['KeyS'],['KeyF']],[['KeyI'],['KeyK'],['KeyJ']],[['KeyT'],['KeyG'],['KeyH']]][ti];
+   if(hit(...K[0]))bm=(bm+4)%5;if(hit(...K[1]))bm=(bm+1)%5;if(hit(...K[2]))choose()}}return}
+ if(ended)return;
+ if(hit('KeyE')){inv();return}if(hit('KeyB')&&!room)G.bike=!G.bike;let dx=0,dy=0;
+ if(keys.ArrowLeft||keys.KeyA){dx=-1;P.face='l'}if(keys.ArrowRight||keys.KeyD){dx=1;P.face='r'}
+ if(keys.ArrowUp||keys.KeyW){dy=-1;P.face='u'}if(keys.ArrowDown||keys.KeyS){dy=1;P.face='d'}
+ const s=((dx&&dy)?1.1:1.5)*(G.belly>=5?.75:1)*(G.bike&&!room?1.8:1),ok=(nx,ny)=>![[2,6],[10,6],[2,14],[10,14]].some(([a,b])=>solid(tileAt(nx+a,ny+b)))&&!npcs.some(n=>Math.abs(n.x-nx)<10&&Math.abs(n.y-ny)<10);
+ if(dx&&ok(P.x+dx*s,P.y))P.x+=dx*s;if(dy&&ok(P.x,P.y+dy*s))P.y+=dy*s;
+ if(dx||dy){P.step+=.15;trail.unshift([P.x,P.y]);if(trail.length>40)trail.pop()}
+ const ft=tileAt(P.x+8,P.y+12);
+ if(room){if(ft===25){if(SUB[room])goRoom('home',SUB[room]);else leave();return}if(ft===34){goRoom(DT[Math.floor((P.x+8)/T)],0);return}}else if(DOORID[ft]){if(!lock){lock=1;enter(DOORID[ft])}}else lock=0;
+ if(ft===6)caveStep();if(ft===32)winGame();
+ foes.forEach(f=>{if(f.dead)return;if(f.cool>0)f.cool--;if(tick%60===0){f.dx=R(-1,1);f.dy=R(-1,1)}
+  const d=Math.hypot(P.x-f.x,P.y-f.y);if(d<70&&f.cool<=0){f.dx=Math.sign(P.x-f.x);f.dy=Math.sign(P.y-f.y)}
+  const nx=f.x+f.dx*.5,ny=f.y+f.dy*.5;if(!solid(tileAt(nx+8,ny+12))&&!solid(tileAt(nx+8,ny+4))&&!DR[tileAt(nx+8,ny+12)]){f.x=nx;f.y=ny}
+  if(d<12&&f.cool<=0&&mode==='walk')startBattle(f)});
+ if(mode==='walk'&&hit(...OK)){const n=npcs.find(n=>Math.hypot(n.x-P.x,n.y-P.y)<24);
+  if(n){const go=()=>{cm();G.belly>=5?say([FATS[R(0,3)]],()=>n.act?n.act(n):say(n.t)):n.act?n.act(n):say(n.t)};if(G.cookie+G.burger>0)openMenu('Talk or give food?',[['Talk',go],['Give Cookie x'+G.cookie,()=>give(n,'cookie')],['Give Burger x'+G.burger,()=>give(n,'burger')],['Never mind',cm]]);else go()}else poke()}
+}
+// ===== DRAW =====
+function person(x,y,hat,body,face,step,gl,fat){const b=Math.sin(step*2)>0?1:0;
+ g.fillStyle='rgba(0,0,0,.25)';g.fillRect(x+3,y+14,10,3);g.fillStyle='#333';g.fillRect(x+4,y+12+b,3,3);g.fillRect(x+9,y+12+(1-b),3,3);
+ g.fillStyle=body;g.fillRect(x+4,y+7,8,6);if(fat)g.fillRect(x+2,y+8,12,5);if(gl){g.fillRect(x+3,y+11,10,2);g.fillStyle='#a52';g.fillRect(x+2,y+2,2,8);g.fillRect(x+12,y+2,2,8);g.fillStyle=body}g.fillStyle='#f6c9a0';g.fillRect(x+4,y+1,8,7);g.fillStyle=hat;g.fillRect(x+3,y,10,3);if(hat==='#d22'){g.fillStyle='#4a6ef0';g.fillRect(x+(face==='l'?1:10),y+2,5,2);g.fillStyle=hat}
+ if(face==='r')g.fillRect(x+11,y+2,4,1);if(face==='l')g.fillRect(x+1,y+2,4,1);
+ g.fillStyle='#000';if(face!=='u'){g.fillRect(x+5,y+4,1,2);g.fillRect(x+10,y+4,1,2)}}
+function foe(f,x,y){const b=Math.sin(tick/10)*1.5;
+ g.fillStyle='rgba(0,0,0,.25)';g.fillRect(x+2,y+14,12,3);g.fillStyle=f.col;g.fillRect(x+2,y+5+b,12,9);g.fillRect(x+4,y+3+b,8,3);
+ if(/Cat|Dog|Monkey|Raccoon/.test(f.name)){g.fillRect(x+3,y+1+b,2,3);g.fillRect(x+11,y+1+b,2,3)}
+ if(/Goat/.test(f.name)){g.fillStyle='#cb8';g.fillRect(x+3,y-1+b,2,5);g.fillRect(x+11,y-1+b,2,5)}
+ g.fillStyle='#000';g.fillRect(x+5,y+7+b,2,2);g.fillRect(x+10,y+7+b,2,2);g.fillRect(x+6,y+11+b,5,1);
+ g.fillStyle='#d00';g.fillRect(x+4,y+6+b,3,1);g.fillRect(x+9,y+6+b,3,1)}
+function tile(t,x,y,tx,ty){if(t>=20&&t<35)return inTile(t,x,y,tx,ty);
+ if(t===1){g.fillStyle='#d4dccf';g.fillRect(x,y,T,T);const rd=(a,b)=>map[b]&&map[b][a]===1;g.fillStyle='#f1f5ea';if(!rd(tx,ty-1))g.fillRect(x,y,T,3);if(!rd(tx,ty+1))g.fillRect(x,y+T-3,T,3);if(!rd(tx-1,ty))g.fillRect(x,y,3,T);if(!rd(tx+1,ty))g.fillRect(x+T-3,y,3,T);if((ty===12||ty===34)&&tx%20>3&&tx%20<8){g.fillStyle='#fff';g.fillRect(x+2,y+T-2,6,2)}return}
+ g.fillStyle='#86d46b';g.fillRect(x,y,T,T);
+ if((tx*7+ty*13)%5===0){g.fillStyle='#5fb04d';g.fillRect(x+3,y+4,1,3);g.fillRect(x+5,y+5,1,2);g.fillRect(x+9,y+9,1,3)}
+ if(WALL[t]||DR[t]){g.fillStyle=WALL[t]||DR[t][0];g.fillRect(x,y,T,T);g.fillStyle='rgba(0,0,0,.18)';g.fillRect(x,y+7,T,1);g.fillRect(x,y+15,T,1);g.fillRect(x+(ty%2?4:10),y,1,7)}
+ if(DR[t]){g.fillStyle=DR[t][1];g.fillRect(x+2,y,12,T);if(t===8){g.fillStyle='#fff';g.fillRect(x+7,y+4,2,8);g.fillRect(x+4,y+7,8,2)}}
+ if(t===3){g.fillStyle='#6b4a2a';g.fillRect(x+6,y+9,4,7);g.fillStyle='#2f8a3a';g.fillRect(x+1,y+1,14,10);g.fillStyle='#46a84d';g.fillRect(x+3,y+2,6,4)}
+ if(t===7||t===6){g.fillStyle='#8c8c9a';g.fillRect(x,y,T,T);g.fillStyle='#6e6e80';g.fillRect(x+(tx*5%8),y+(ty*3%8),6,4);g.fillStyle='#a8a8b6';g.fillRect(x+2,y+2,4,2)}
+ if(t===6){g.fillStyle='#000';g.fillRect(x+2,y+3,12,13);g.fillRect(x+4,y+1,8,3);if(tick%30<15){g.fillStyle='#ffd';g.fillRect(x+7,y+8,2,2)}}
+ if(t===4){g.fillStyle='#fff';g.fillRect(x+4,y+5,3,3);g.fillStyle='#e44';g.fillRect(x+10,y+9,3,3);g.fillStyle='#fd4';g.fillRect(x+5,y+6,1,1)}
+ if(t===14){g.fillStyle='#d33';g.fillRect(x+3,y+1,10,15);g.fillStyle='#9df';g.fillRect(x+5,y+3,6,6);g.fillStyle='#222';g.fillRect(x+6,y+11,4,2)}}
+function drawWorld(){
+ const cx=Math.floor(Math.max(0,Math.min(W*T-256,P.x-128))),cy=Math.floor(Math.max(0,Math.min(H*T-224,P.y-112)));
+ g.fillStyle='#000';g.fillRect(0,0,256,224);g.save();g.translate(-cx+(W*T<256?(256-W*T)>>1:0),-cy+(H*T<224?(224-H*T)>>1:0));
+ for(let y=Math.max(0,cy>>4);y<Math.min(H,(cy>>4)+16);y++)for(let x=Math.max(0,cx>>4);x<Math.min(W,(cx>>4)+17);x++)tile(map[y][x],x*T,y*T,x,y);
+ g.font='bold 7px monospace';g.fillStyle='#fff';if(!room)LB.forEach(([x,y,t])=>g.fillText(t,x*T,y*T-3));if(room==='home')[[2,'ROOM'],[6,'GRANDMA'],[11,'PARENTS']].forEach(([x,t])=>g.fillText(t,x*T-6,2*T+6));
+ const ents=[...npcs.map(n=>({y:n.y,f:()=>person(n.x,n.y,n.hat,n.body,'d',0,0,(G.nb[n.k]||0)>=5)})),...foes.filter(f=>!f.dead).map(f=>({y:f.y,f:()=>foe(f,f.x,f.y)})),{y:P.y,f:()=>{person(P.x,P.y,P4[0].hat,P4[0].body,P.face,P.step,P4[0].girl,G.belly>=5);if(G.bike&&!room){g.fillStyle='#222';g.fillRect(P.x+1,P.y+11,5,5);g.fillRect(P.x+10,P.y+11,5,5);g.fillStyle='#d33';g.fillRect(P.x+4,P.y+10,8,2)}}}];
+ ents.sort((a,b)=>a.y-b.y).forEach(e=>e.f());g.restore();
+ if(room==='cave'){const sx=P.x-cx+8,sy=P.y-cy+8,gr=g.createRadialGradient(sx,sy,24,sx,sy,92);gr.addColorStop(0,'rgba(0,0,0,0)');gr.addColorStop(1,'rgba(0,0,0,.94)');g.fillStyle=gr;g.fillRect(0,0,256,224)}
+ g.fillStyle='rgba(0,0,0,.6)';g.fillRect(0,0,256,11);g.fillStyle='#fff';g.font='8px monospace';
+ g.fillText('$'+G.money+'  Lv'+G.lv+'  Shards '+G.shards+'/3  Lantern '+(G.lens?'yes':'no')+(G.belly>=9?'  SICK':G.belly>=5?'  FAT':'')+(G.bike&&!room?'  BIKE':''),4,8)}
+function drawBattle(){
+ for(let r=14;r>=0;r--){g.fillStyle=(r+Math.floor(tick/6))%2?'#5a2a8a':'#8a4ac0';g.beginPath();g.arc(128,90,r*14,0,7);g.fill()}
+ g.save();g.translate(128,70+Math.sin(tick/9)*3);g.scale(4,4);g.translate(-8,-8);foe(en,0,0);g.restore();
+ g.fillStyle='#000';g.fillRect(88,124,80,8);g.fillStyle='#e44';g.fillRect(89,125,78*Math.max(0,en.hp)/en.max,6);
+ g.font='8px monospace';g.fillStyle='#fff';g.fillText(en.name,88,121);
+ P4.forEach((m,i)=>{const x=4+i*63;box(x,168,59,50);g.fillStyle='#2f7d86';g.fillRect(x,168,59,13);g.fillStyle=i===ti&&bph==='menu'&&!dlg?'#ff6':'#fff';g.fillText((i===ti&&mode==='battle'?'>':'')+m.n,x+4,179);
+  g.fillStyle=m.hp<=0?'#888':m.shown<10?'#f66':'#fff';g.fillText('HP '+Math.max(0,m.shown),x+4,191);g.fillStyle='#fff';g.fillText('PP '+m.pp,x+4,202);if(m.hp<=0)g.fillText('KO',x+38,179)});
+ if(bph==='menu'&&!dlg){box(6,6,244,36);g.fillStyle='#fff';
+  ['Bash','PSI','Cookie x'+G.cookie,'Burger x'+G.burger,'Run Away'].forEach((s,i)=>{const p=[[0,0],[0,1],[1,0],[1,1],[2,0]][i];g.fillText((i===bm?'>':' ')+s,14+p[0]*80,20+p[1]*14)})}}
+function drawTitle(){g.fillStyle='#10102a';g.fillRect(0,0,256,224);for(let i=0;i<40;i++){g.fillStyle=(i+Math.floor(tick/20))%3?'#fff':'#88f';g.fillRect((i*53)%256,(i*37)%160,1,1)}
+ g.fillStyle='#86d46b';g.fillRect(0,170,256,54);g.fillStyle='#ffd';g.beginPath();g.arc(205,60,22,0,7);g.fill();
+ g.font='bold 26px monospace';g.fillStyle='#000';g.fillText('FINE WORLD',42,102);g.fillStyle='#ff8';g.fillText('FINE WORLD',40,100);
+ g.font='8px monospace';g.fillStyle='#fff';g.fillText('a town called Pure  (c) 1986',62,116);if(tick%60<40)g.fillText('Press Z / tap A to start',72,140);
+ P4.forEach((m,i)=>person(84+i*24,150,m.hat,m.body,'d',tick/10,m.girl))}
+function draw(){
+ if(mode==='title')drawTitle();else if(mode==='setup')drawSetup();else if(mode==='battle')drawBattle();else drawWorld();
+ g.font='8px monospace';
+ if(mode==='menu'){const n=mn.o.length;box(8,8,200,22+n*12);g.fillStyle='#ff8';g.fillText(mn.t+'    $'+G.money,14,19);g.fillStyle='#fff';mn.o.forEach((o,i)=>g.fillText((i===mn.i?'> ':'  ')+o[0],14,33+i*12))}
+ if(mode==='phone'){box(30,40,196,72);g.fillStyle='#fff';g.fillText('PAYPHONE - dial a number',44,56);const s=num.padEnd(10,'_');
+  g.font='16px monospace';g.fillStyle='#ff8';g.fillText(s.slice(0,3)+'-'+s.slice(3,6)+'-'+s.slice(6),56,82);g.font='8px monospace';g.fillStyle='#fff';g.fillText('Enter = call   Esc = hang up',44,102)}
+ if(dlg){const y=mode==='battle'?8:150;box(8,y,240,56);g.fillStyle='#fff';
+  wrap(dlg.lines[dlg.i].slice(0,Math.floor(dlg.ch)),224).slice(0,4).forEach((l,i)=>g.fillText(l,16,y+14+i*12));
+  if(dlg.ch>=dlg.lines[dlg.i].length&&tick%40<25)g.fillText('▼',232,y+50)}
+ if(ended&&!dlg){g.fillStyle='rgba(0,0,0,.6)';g.fillRect(0,80,256,56);g.fillStyle='#ff6';g.font='20px monospace';g.fillText('YOU WIN!',80,112);g.font='8px monospace';g.fillStyle='#fff';g.fillText('Fine World is Fine again.',72,128)}
+ if(wait){box(60,90,136,22);g.fillStyle='#fff';g.fillText('...',122,104)}const v=mode==='phone'?'grid':'none';if(kp.style.display!==v)kp.style.display=v;
+ g.fillStyle='rgba(0,0,0,.13)';for(let y=0;y<224;y+=2)g.fillRect(0,y,256,1);
+ for(const k in press)delete press[k]}
+// ===== MUSIC: one long 16-bit style song (4 channels + echo), plays the whole game =====
+const STORY=['Welcome to Pure, the most average town on Earth. Everything here is Fine.','Then the animals got mad. Bull dogs, monkeys, even the stray cats.','Grandpa Joe says an Angry Goat in a far cave started it. Only three Moon Shards and a Lantern can open that cave.','You wake up at home with three friends. Earn money, get gear, and go find the cave!'];
+let AC,out,NB,musicOn=1,mst=0,nextT=0;
+const SC=[0,2,4,7,9],CH={C:[36,[0,4,7]],G:[43,[7,11,2]],A:[45,[9,0,4]],F:[41,[5,9,0]],D:[38,[2,5,9]],E:[40,[4,7,11]]};
+const PR=['CGAFCGFG','AFCGAFDG','FCGAFCDG','CGAFCGFG','AFCGAFDG','DGCAFGCC','FCGAFCDG','CGAFCGFC'],SD=[3,7,11,3,7,17,11,3],MM={};
+const mid=i=>60+12*Math.floor(i/5)+SC[i%5];
+function melody(sg,b){const s=b>>3,bi=b&7,c=CH[sg.pr[s][bi]][1];let r=(sg.sd[s]*31+(bi&3)*17)%233280,i=5,o=[];
+ for(let k=0;k<8;k++){r=(r*9301+49297)%233280;const q=r/233280;
+  if(k===0||k===4){let best=i,bd=9;for(let j=Math.max(1,i-3);j<=Math.min(10,i+3);j++)if(c.includes(SC[j%5])&&Math.abs(j-i)<bd){bd=Math.abs(j-i);best=j}i=best;o.push(mid(i))}
+  else if(q<.22)o.push(0);else{i=Math.max(1,Math.min(10,i+(q<.5?-1:q<.8?1:2)));o.push(mid(i))}}return o}
+function nt(n,t,d,type,v){if(!n)return;const o=AC.createOscillator(),gn=AC.createGain();o.type=type;o.frequency.value=440*Math.pow(2,(n-69)/12);gn.gain.setValueAtTime(0,t);gn.gain.linearRampToValueAtTime(v,t+.01);gn.gain.exponentialRampToValueAtTime(.001,t+d);o.connect(gn);gn.connect(out);o.start(t);o.stop(t+d)}
+function nz(t,d,v,fq){const s=AC.createBufferSource(),f=AC.createBiquadFilter(),gn=AC.createGain();s.buffer=NB;f.type=fq>5000?'highpass':'bandpass';f.frequency.value=fq;gn.gain.setValueAtTime(v,t);gn.gain.exponentialRampToValueAtTime(.001,t+d);s.connect(f);f.connect(gn);gn.connect(out);s.start(t);s.stop(t+d)}
+function kick(t){const o=AC.createOscillator(),gn=AC.createGain();o.frequency.setValueAtTime(140,t);o.frequency.exponentialRampToValueAtTime(40,t+.12);gn.gain.setValueAtTime(.35,t);gn.gain.exponentialRampToValueAtTime(.001,t+.16);o.connect(gn);gn.connect(out);o.start(t);o.stop(t+.18)}
+function sched(t,st){const b=(st>>3)%64,k=st&7,cd=CH[PR[b>>3][b&7]],m=(MM[b]||(MM[b]=melody(b)))[k];
+ nt(m,t,.2,'square',.05);nt(60+cd[1][[0,1,2,1,0,1,2,1][k]],t,.14,'square',.018);
+ if(k===0||k===3||k===4||k===6)nt(cd[0]+(k===6?7:0),t,.28,'triangle',.12);
+ if(k===0||k===4)kick(t);if(k===2||k===6)nz(t,.12,.07,1800);if(k&1)nz(t,.04,.025,7000)}
+function startMusic(){try{AC=new(window.AudioContext||window.webkitAudioContext)();out=AC.createGain();out.gain.value=.8;out.connect(AC.destination);
+ const dl=AC.createDelay(),fb=AC.createGain(),wt=AC.createGain();dl.delayTime.value=.32;fb.gain.value=.28;wt.gain.value=.22;out.connect(dl);dl.connect(fb);fb.connect(dl);dl.connect(wt);wt.connect(AC.destination);
+ NB=AC.createBuffer(1,AC.sampleRate*.3,AC.sampleRate);const d=NB.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;
+ nextT=AC.currentTime+.15;setInterval(()=>{if(AC.state==='suspended')AC.resume();if(!musicOn){nextT=AC.currentTime+.15;return}while(nextT<AC.currentTime+.3){sched2(nextT);nextT+=SG[cur].st}},80)}catch(e){}}
+// ===== songs per place: field, battle, home, hotel =====
+const SG={field:{pr:['CGAFCGFG','AFCGAFDG','FCGAFCDG','CGAFCGFG','AFCGAFDG','DGCAFGCC','FCGAFCDG','CGAFCGFC'],sd:[3,7,11,3,7,17,11,3],st:.16,ld:'square',dr:1},
+ battle:{pr:['AFGEAFGE','AEFGAEDG','FGAEFGAE','DEFGAEFE'],sd:[5,9,13,21],st:.1,ld:'sawtooth',dr:2},
+ home:{pr:['CFCGCFGC','AFCGAFCG'],sd:[2,4],st:.24,ld:'triangle',dr:0},
+ hotel:{pr:['DGCADGCA','FDGCFDGC'],sd:[8,12],st:.2,ld:'sine',dr:3},cave:{pr:['AEAEFEDE','AEFEAEDE'],sd:[6,14],st:.22,ld:'sine',dr:0}};
+function sched2(t){const want=mode==='battle'?'battle':room==='cave'?'cave':(room==='home'||SUB[room])?'home':room==='hotel'?'hotel':'field';if(want!==cur){cur=want;cst=0}
+ const sg=SG[cur],b=(cst>>3)%(sg.pr.length*8),k=cst&7,cd=CH[sg.pr[b>>3][b&7]],m=(MM[cur+b]||(MM[cur+b]=melody(sg,b)))[k];cst++;
+ nt(m,t,sg.st+.05,sg.ld,sg.ld==='sawtooth'?.03:sg.ld==='sine'?.09:.05);nt(60+cd[1][[0,1,2,1,0,1,2,1][k]],t,.14,'square',.018);
+ if(k===0||k===3||k===4||k===6)nt(cd[0]+(k===6?7:0),t,.28,'triangle',.12);
+ if(sg.dr>0&&sg.dr<3){if(k===0||k===4||(sg.dr===2&&(k===2||k===6)))kick(t);if(k===2||k===6)nz(t,.12,.07,1800);if(k&1)nz(t,.04,.025,7000)}else if(sg.dr===3&&(k&1))nz(t,.05,.02,7000)}
+// ===== interiors =====
+const IC={21:'#3a3a5a',22:'#e8a0b0',23:'#8a5a30',24:'#6a4a2a',25:'#c33',26:'#b08040',27:'#2f8a3a',28:'#a4f',29:'#ddd'};
+function inTile(t,x,y,tx,ty){if(t>=30){if(t===34){g.fillStyle='#6a3d20';g.fillRect(x,y,T,T);g.fillStyle='#ee4';g.fillRect(x+11,y+8,2,2);return}if(t===33){g.fillStyle='#bf9565';g.fillRect(x,y,T,T);g.fillStyle='#bbb';g.fillRect(x+2,y+2,12,9);g.fillStyle='#142';g.fillRect(x+3,y+3,10,6);g.fillStyle='#4f4';g.fillRect(x+4,y+4,4,1);g.fillRect(x+4,y+6,6,1);g.fillStyle='#999';g.fillRect(x+4,y+11,8,3);return}g.fillStyle=t===30?((tx+ty)%2?'#4a4458':'#454054'):t===31?'#23232f':'#fff6b0';g.fillRect(x,y,T,T);if(t===31){g.fillStyle='#2e2e3e';g.fillRect(x+3,y+4,5,3)}return}g.fillStyle=(tx+ty)%2?'#c9a070':'#bf9565';g.fillRect(x,y,T,T);if(t===20)return;g.fillStyle=IC[t];g.fillRect(x,y,T,T);
+ if(t===22){g.fillStyle='#fff';g.fillRect(x+1,y+2,14,6)}if(t===24){g.fillStyle='#c84';g.fillRect(x+1,y+3,14,2);g.fillRect(x+1,y+9,14,2)}
+ if(t===28){g.fillStyle='#ff0';g.fillRect(x+4,y+2,8,11);g.fillStyle='#000';g.font='8px monospace';g.fillText('?',x+6,y+10)}if(t===27){g.fillStyle='#6b4a2a';g.fillRect(x+5,y+10,6,6)}}
+function mkRoom(id){const w=14,h=10,m=[],n=[],f=(t,...p)=>{for(let i=0;i<p.length;i+=2)m[p[i+1]][p[i]]=t},nn=(x,y,hat,body,act)=>n.push({x:x*T,y:y*T,hat,body,t:['...'],act,k:id+x+'_'+y});
+ for(let y=0;y<h;y++){m[y]=[];for(let x=0;x<w;x++)m[y][x]=(!x||!y||x===w-1||y===h-1)?21:20}
+ f(25,6,h-1,7,h-1);
+ if(id==='home'){f(34,2,0,6,0,11,0);f(22,10,4,11,4);f(29,12,5);f(27,1,7);nn(7,5,'#c60','#e8a',momTalk)}
+ else if(id==='me'){f(22,1,1,2,1);f(33,12,3);f(24,5,1,8,1);f(27,12,7)}
+ else if(id==='gma'){f(22,11,2,12,2);f(24,1,1,2,1);f(27,1,7);nn(6,4,'#ddd','#a8c',gmaTalk)}
+ else if(id==='par'){f(22,1,1,2,1,3,1);f(23,9,2);f(24,12,1);f(27,12,7)}
+ else if(id==='office'){f(23,3,3,4,3,9,3,10,3);f(27,1,7,12,7);nn(6,4,'#444','#eee',dadTalk)}
+ else if(id==='house'){f(23,6,5,7,5);f(24,1,1,2,1,11,1);f(22,11,6);f(28,3,5);nn(7,3,'#963','#6a8',hostTalk)}
+ else if(id==='jail'){f(24,1,1,2,1,3,1);f(22,11,2);nn(7,4,'#235','#235',()=>say(['Officer Pickle: Do NOT prank 911! ...Fine. You may go.','(Walk onto the red mat to leave.)']))}
+ else if(id==='hotel'){f(26,2,3,4,3);f(22,9,2,10,2,11,2);f(27,1,7,12,7);nn(3,3,'#a4e','#333',()=>door(16))}
+ else{f(26,4,3,5,3,8,3,9,3);f(id==='hospital'?22:24,1,1,2,1,11,1,12,1);f(27,12,7);nn(6,3,id==='hospital'?'#fff':id==='food'?'#e63':'#39c','#8cf',()=>door(id==='hospital'?8:id==='food'?9:10))}
+ return{m,w,h,n}}
+function enter(id){if(!room)SV={map,W,H,npcs,foes,x:P.x,y:P.y};room=id;const r=mkRoom(id);map=r.m;W=r.w;H=r.h;npcs=r.n;foes=[];P.x=6*T+8;P.y=(H-2)*T;trail.length=0;lock=1;if(id==='home'){G.money+=50;say(['Mom: Welcome home, sweetie! Here is $50 for you.'])}}
+function leave(){map=SV.map;W=SV.W;H=SV.H;npcs=SV.npcs;foes=SV.foes;P.x=SV.x;P.y=SV.y+(room==='cave'?30:0);room=null;trail.length=0;lock=1}
+function stuff(n){G.belly+=n;return G.belly>=9?'You feel SICK!':G.belly>=5?'You are getting FAT!':''}
+const WEIRD=['The closet whispers: "Is it Tuesday?" It is always Tuesday.','The TV shows YOU, watching the TV. You wave. It waves late.','A sock puppet in the mirror says: "Eat more burgers." ($2 falls out of it.)','The lamp asks if you have seen its other lamp.','Your bed has a tiny door. A mouse in a tie nods at you.','The goat poster blinks, then stares at you angrily.','A cookie falls from the ceiling. You eat it.','The floor is lava for 3 seconds. Then it is carpet again.'];
+function weird(){const i=R(0,WEIRD.length-1);if(i===2)G.money+=2;const w=i===6?stuff(1):'';say([WEIRD[i]+(w?' '+w:'')])}
+function poke(){for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const t=tileAt(P.x+8+a*T,P.y+8+b*T);
+ if(t===14){mode='phone';num='';return}
+ if(t===28){weird();return}
+ if(t===33){computer();return}
+ if(t===23&&room==='par'){say(['A note on the dresser: Gone to work at the Pure Office. Back at six. Love, Dad.']);return}
+ if(t===29){const w=stuff(2);P4.forEach(m=>m.hp=Math.min(m.max,m.hp+10));say(['A note on the fridge: MOM 646-717-4844 / STORE 646-999-9999 / PURE MART FOOD 646-982-0901.','You raid the fridge. Cold spaghetti!'+(w?' '+w:'')]);return}
+ if(t===22&&room==='me'){healAll();say(['You nap. The bed is cozy.','Everyone is fully rested.']);return}}}
+// ===== AI phone calls & mom =====
+const ch3=(a,b,c)=>[a,b,c].map(t=>({t,go:0}));
+function momTalk(){say(MOMS[R(0,2)])}
+const MOMS=[['Mom: Hi sweetie! Dinner is at six.'],['Mom: Be careful out there, sweetie.'],['Mom: I made sandwiches. Help yourself!']];
+function momOld(){CV={who:'Mom',sys:`You are the kid's extremely annoying, overbearing mom in the cartoon town of Pure. Nag them about something silly (vegetables, coat, Grandma, posture, socks). Max 30 words. The kid only ever answers OKAY, FINE or WHATEVER, so give exactly those three choices.`,h:[],n:0,max:1,fb:()=>({text:['Did you eat a vegetable today? A real one? Ketchup does not count!','Why are you wearing that? Also, have you called Grandma?','Stand up straight and wear a coat! It is always 3:07 and chilly!'][R(0,2)],choices:ch3('OKAY','FINE','WHATEVER')})};turn()}
+function strangerCall(){CV={who:'Stranger',sys:`You are a random weird stranger in the cartoon town of Pure who just answered a wrong-number call from a kid named ${P4[0].n}. Be funny and odd. Often offer something strange, like $30 if the kid comes to your house; the kid's reply that accepts must have go true. Max 30 words.`,h:[],n:0,max:4,fb:()=>CV.h.length<1?{text:'Hi! Wrong number? Lucky you! I will give you $30 if you come to my house.',choices:[{t:'Why?',go:0},{t:'Okay!',go:1},{t:'Really?',go:0}]}:{text:'Yes really! I have snacks, a goat and money. Come over!',choices:[{t:'Okay!',go:1},{t:'No thanks',go:0}]}};turn()}
+function hostTalk(){CV={who:'Host',sys:`You are a quirky resident of the cartoon town of Pure. A kid named ${P4[0].n} just came to your house because you invited them (you gave them $30). Be weird and funny; strange things happen in your house. Max 30 words. Never set go true.`,h:[],n:0,max:3,fb:()=>({text:'Welcome! Please do not look at the sink. It looks back.',choices:ch3('Okay...','Weird!','Bye!')})};turn()}
+function goHouse(){enter('house');G.money+=30;say(['You arrive at a strange little house. The host waves you in.','They hand you $30, just like they promised!'])}
+function endCv(go){const w=CV&&CV.who;CV=null;if(go)say(['You hang up and run over to their house!'],goHouse);else if(w==='Stranger')say(['Click. They hung up.'])}
+async function turn(fin){wait=1;let r=null;
+ try{if(typeof claude!=='undefined'){SM=SM||await claude.use('sample');if(SM){const pm=CV.sys+(CV.h.length?'\nChat so far:\n'+CV.h.map(x=>x.r+': '+x.c).join('\n'):'\nStart the conversation.')+'\nReply with ONLY JSON: {"text":"your line","choices":[{"t":"kid reply, max 22 chars","go":false},{"t":"...","go":false},{"t":"...","go":false}],"end":false}. Give 3 different funny choices. '+(fin?'This is your last line: set end true and choices [].':'');const x=await SM(pm,{modelTier:'quick',cache:false}),m=x.text.match(/\{[\s\S]*\}/);if(m)r=JSON.parse(m[0])}}}catch(e){}
+ wait=0;if(!r||!r.text)r=CV.fb();r.choices=(r.choices||[]).slice(0,3).map(c=>typeof c==='string'?{t:c,go:0}:c);
+ CV.h.push({r:CV.who,c:r.text});
+ say([r.text],()=>{if(fin||r.end||!r.choices.length)return endCv();
+  openMenu(CV.who+': you say...',r.choices.map(c=>[c.t,()=>{CV.h.push({r:'Kid',c:c.t});CV.n++;cm();if(c.go)endCv(1);else turn(CV.n>=CV.max)}]))})}
+// ===== player setup screen =====
+function drawSetup(){g.fillStyle='#10102a';g.fillRect(0,0,256,224);g.font='8px monospace';g.fillStyle='#fff';const s=su;
+ if(s.st==='n'){g.fillText('How many players? (1-4)',66,50);for(let i=0;i<4;i++)g.fillText((s.sel===i?'> ':'  ')+(i+1)+' player'+(i?'s':''),92,80+i*14);g.fillText('2+ players share one keyboard (keys listed below the game)',8,160)}
+ else if(s.st==='g'){g.fillText('Player '+(s.i+1)+': Boy or Girl?',76,50);['Boy','Girl'].forEach((t,i)=>g.fillText((s.sel===i?'> ':'  ')+t,110,80+i*14));person(120,120,'#d22','#46c','d',tick/10,s.sel)}
+ else{g.fillText('Player '+(s.i+1)+': type your name, Enter to confirm',24,50);g.font='16px monospace';g.fillStyle='#ff8';g.fillText(s.name+(tick%40<25?'_':''),88,100);g.font='8px monospace';g.fillStyle='#fff';g.fillText('(empty = default name)',84,170);person(120,120,'#d22','#46c','d',tick/10,P4[s.i].girl)}}
+function emergency(){openMenu('911: what is your emergency?',[['I am hurt  $20 ambulance',()=>{cm();buy(20,()=>{healAll();G.belly=0},'An ambulance zooms over and patches everyone up. "Stop eating burgers off the floor," says the medic.')}],['Angry animals nearby!',()=>{cm();foes.forEach(f=>{if(Math.hypot(f.x-P.x,f.y-P.y)<160)f.cool=1500});say(['Officer Pickle arrives and scares the nearby animals away for a while.'])}],['Just a prank call',()=>{cm();say(['The dispatcher says: "This is NOT a toy!" Sirens wail...','Officer Pickle arrests you for prank calling 911!'],()=>enter('jail'))}],['Hang up',cm]])}
+const NEWS=['PURE TIMES: Animals Still Angry. Citizens Still Fine.','PURE TIMES: Local Goat Refuses Cave Tour.','PURE TIMES: Bike Sales Up 300 Percent.','PURE TIMES: Town Clock Stuck At 3:07 For Days.'];
+function computer(){openMenu('COMPUTER  (8-bit OS 1.0)',[['Order from Pure Store (modem)',()=>door(10)],['Read The Pure Times',()=>{cm();say([NEWS[R(0,3)]])}],['Shut down',cm]])}
+function inv(){openMenu('ITEMS  $'+G.money,[['Cookie x'+G.cookie+'  (eat)',()=>eatI('cookie')],['Burger x'+G.burger+'  (eat)',()=>eatI('burger')],['Bat +'+G.bat+'  Armor +'+G.arm,()=>say(['Bat level '+G.bat+', armor level '+G.arm+'.'])],['Lantern '+(G.lens?'yes':'no')+'  Shards '+G.shards+'/3',()=>say(['Lantern: '+(G.lens?'yes':'no')+'. Moon Shards: '+G.shards+'/3.'])],['Bike: '+(G.bike?'riding':'parked'),()=>{G.bike=!G.bike;cm()}],['Close',cm]])}
+function eatI(k){if(!G[k])return say(['None left!']);G[k]--;P4.forEach(m=>{if(m.hp>0)m.hp=Math.min(m.max,m.hp+(k==='cookie'?12:30))});const w=stuff(k==='cookie'?1:2);say(['Everyone shares a '+k+'. HP recovers!'+(w?' '+w:'')])}
+const CT=[['Cave Bat',40,6,10,16,6,'#546','flaps at your face.'],['Spider',50,7,11,20,7,'#323','bites with eight legs.'],['Snake',58,9,13,24,9,'#6a4','hisses and strikes.'],['Cave Bear',90,11,17,40,16,'#654','roars like a drum.']];
+function mkCave(){const w=40,h=48,m=[];for(let y=0;y<h;y++){m[y]=[];for(let x=0;x<w;x++)m[y][x]=31}
+ const dig=(x,y,r)=>{for(let j=-r;j<=r;j++)for(let i=-r;i<=r;i++){const a=x+i,b=y+j;if(a>0&&b>0&&a<w-1&&b<h-1)m[b][a]=30}};
+ let x=20,y=44;dig(x,y,2);while(y>6){y-=R(1,2);x=Math.max(4,Math.min(w-5,x+R(-2,2)));dig(x,y,R(0,5)?1:2)}
+ for(let k=0;k<6;k++){let a=R(6,w-7),b=R(8,40);for(let s=0;s<12;s++){a=Math.max(3,Math.min(w-4,a+R(-2,2)));b=Math.max(3,Math.min(h-4,b+R(-2,2)));dig(a,b,1)}}
+ dig(x,4,3);m[4][x]=32;m[47][19]=m[47][20]=m[47][21]=25;return{m,w,h,sx:x}}
+function enterCave(){if(!room)SV={map,W,H,npcs,foes,x:P.x,y:P.y};room='cave';const r=mkCave();map=r.m;W=r.w;H=r.h;npcs=[];foes=[];P.x=20*T;P.y=45*T;trail.length=0;lock=1;
+ for(let i=0;i<11;i++){let a,b,t=0;do{a=R(2,W-3);b=R(8,38)}while(map[b][a]!==30&&++t<200);if(map[b][a]===30)mk(CT[Math.min(3,Math.floor((45-b)/11))],a,b)}
+ mk(['Cave Bear King',260,18,28,260,120,'#543','roars so loud the cave shakes.'],r.sx,6,{boss:1});
+ say(['~ CAVE BOUND ~','Same kid, new adventure. Your lantern light shakes on the rocks.','Find the Still Stone at the far end. Walk back to the red mat to leave any time.'])}
+const FATS=['You look great today!','What a cozy, huggable kid you are!','You are always welcome here!','Looking happy and healthy, my friend!'];
+const SUB={me:2,gma:6,par:11},DT={2:'me',6:'gma',11:'par'};
+function goRoom(id,fx){room=id;const r=mkRoom(id);map=r.m;W=r.w;H=r.h;npcs=r.n;foes=[];trail.length=0;lock=1;if(fx){P.x=fx*T+2;P.y=2*T}else{P.x=6*T+8;P.y=(H-2)*T}}
+function gmaTalk(){if(G.cookie<9)G.cookie++;say(['Grandma: Oh, there you are, dear! Take a cookie.','(Got a Cookie.)'])}
+function dadTalk(){say([['Dad: Working hard, kiddo! Stay out of trouble.','Dad: The boss says I can leave at six. Ride safe!','Dad: Did you see Grandma today? She misses you.'][R(0,2)]])}
+function give(n,k){cm();if(!G[k])return say(['None left!']);G[k]--;const b=(G.nb[n.k]||0)+(k==='cookie'?1:2);G.nb[n.k]=b;say([b>=9?'Urp... I feel sick...':b>=5?'Oof! I am getting chubby!':'Yum! Thank you!'])}
+function chime(){if(!AC||!musicOn)return;const t=AC.currentTime+.02;[84,88,91,96,103].forEach((n,i)=>nt(n,t+i*.09,.6,'triangle',.13))}
+function loop(){update();draw();requestAnimationFrame(loop)}
+loop();
+</script></body></html>
